@@ -100,6 +100,7 @@
 (defvar lingr-say-window-height-per 20)
 (defvar lingr-say-buffer "*Lingr Say*")
 (defvar lingr-get-before-limit 30)
+(defvar lingr-icon-mode t)
 
 ;;;; Utility Macro
 (defmacro lingr-aif (test-form then-form &rest else-forms)
@@ -337,11 +338,33 @@
   (loop for key being the hash-keys in lingr-room-table using (hash-value room)
         if (buffer-live-p (lingr-room-buffer room)) collect key))
 
+(defvar lingr-image-hash (make-hash-table :test 'equal))
+
+(defsubst lingr-nickname-icon-wrap (nickname message)
+  (let ((image 
+	 (or (gethash nickname lingr-image-hash)
+	     (let* ((url (assoc-default 'icon_url message))
+		    (buf (url-retrieve-synchronously url)))
+	       (unwind-protect
+		   (with-current-buffer buf
+;		     (condition-case e
+			 (let* ((type (when (re-search-forward  "Content-Type: image/\\(.+\\)" nil t 1)
+					(intern (match-string 1))))
+				(data (when (re-search-forward "^$" nil t 1)
+					(buffer-substring (+ 1 (match-end 0)) (point-max)))))
+			   (and type data
+				(puthash nickname (create-image data type t) lingr-image-hash))))
+;		       (error nil)))
+		 (kill-buffer buf))))))
+    (if image (format "%s\n%s\n" nickname (propertize "_" 'display image)) nickname))) 
+
 (defun lingr-decode-message-text (message)
   (let ((text-cons (assoc 'text message))
         (nick-cons (assoc 'nickname message)))
     (setcdr text-cons (decode-coding-string (cdr text-cons) 'utf-8))
-    (setcdr nick-cons (decode-coding-string (cdr nick-cons) 'utf-8))
+    (let* ((nickname (decode-coding-string (cdr nick-cons) 'utf-8))
+	   (nickname (if lingr-icon-mode (lingr-nickname-icon-wrap nickname message) nickname)))
+      (setcdr nick-cons nickname))
     message))
 
 (defun lingr-decode-timestamp (timestamp)
