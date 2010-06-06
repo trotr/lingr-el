@@ -340,52 +340,63 @@
 
 (defvar lingr-image-hash (make-hash-table :test 'equal))
 
-(defsubst lingr-nickname-icon-wrap (nickname message)
-  (let ((image 
-	 (or (gethash nickname lingr-image-hash)
-	     (let* ((url (assoc-default 'icon_url message))
-		    (buf (url-retrieve-synchronously url)))
-	       (unwind-protect
-		   (with-current-buffer buf
-;		     (condition-case e
-			 (let* ((type (when (re-search-forward  "Content-Type: image/\\(.+\\)" nil t 1)
-					(intern (match-string 1))))
-				(data (when (re-search-forward "^$" nil t 1)
-					(buffer-substring (+ 1 (match-end 0)) (point-max)))))
-			   (and type data
-				(puthash nickname (create-image data type t) lingr-image-hash))))
-;		       (error nil)))
-		 (kill-buffer buf))))))
-    (if image (format "%s\n%s\n" nickname (propertize "_" 'display image)) nickname))) 
+(defsubst lingr-icon-image (key message)
+  (or (gethash key lingr-image-hash)
+      (let* ((url (assoc-default 'icon_url message))
+	     (buf (url-retrieve-synchronously url)))
+	(unwind-protect
+	    ;(with-current-buffer buf
+	      (condition-case e
+		  (let* ((type (when (re-search-forward  "Content-Type: image/\\(.+\\)" nil t 1)
+				 (intern (match-string 1))))
+			 (data (when (re-search-forward "^$" nil t 1)
+				 (buffer-substring (+ 1 (match-end 0)) (point-max)))))
+		    (and type data
+			 (puthash key (create-image data type t) lingr-image-hash))))
+	     ; (error nil)))
+	(kill-buffer buf)))))
+
+(defvar lingr-prev-key nil)
 
 (defun lingr-decode-message-text (message)
   (let ((text-cons (assoc 'text message))
         (nick-cons (assoc 'nickname message)))
     (setcdr text-cons (decode-coding-string (cdr text-cons) 'utf-8))
-    (let* ((nickname (decode-coding-string (cdr nick-cons) 'utf-8))
-	   (nickname (if lingr-icon-mode (lingr-nickname-icon-wrap nickname message) nickname)))
-      (setcdr nick-cons nickname))
-    message))
+    (setcdr nick-cons (decode-coding-string (cdr nick-cons) 'utf-8)))
+  message)
 
 (defun lingr-decode-timestamp (timestamp)
   (format-time-string "[%x %T]" (apply 'encode-time (parse-time-string (timezone-make-date-arpa-standard timestamp)))))
 
 (defun lingr-insert-message (message)
   (let* ((nick (lingr-message-nick message))
-         (text (lingr-message-text message))
+	 (text (lingr-message-text message))
          (time-str (lingr-decode-timestamp (lingr-message-timestamp message)))
          (fill-str (make-string 2 ? )))
+    
     (setq time-str (propertize time-str 'face 'lingr-timestamp-face))
+    
     (setq nick (propertize nick
-                           'face 'lingr-nickname-face
-                           'lingr-mes-id (lingr-message-id message)))
-    (insert (format "%-20s %s:\n%s\n"
-                    nick time-str
-                    (concat fill-str
-                            (mapconcat 'identity (split-string text "\n")
-                                       (concat "\n" fill-str)))))))
+			   'face 'lingr-nickname-face
+			   'lingr-mes-id (lingr-message-id message)))
 
+    (cond ((not lingr-icon-mode)
+	   (insert (format "%-20s %s:\n" nick time-str)))
+	  (t 
+	   (when (not (string-equal lingr-prev-key nick))
+	     (let ((image (lingr-icon-image nick message)))
+	       (if image
+		   (insert (format "%-20s %s:\n %s\n" nick time-str (propertize "_" 'display image)))
+		   (insert (format "%-20s %s:" nick time-str)))))))
+    
+    (insert (concat fill-str
+		    (mapconcat 'identity (split-string text "\n")
+			       (concat "\n" fill-str))
+		    "\n"))))
+
+(setq lingr-icon-mode t)
 (defun lingr-refresh-rooms (json)
+  (setq lingr-prev-key nil)
   (loop for roominfo across (lingr-response-rooms json)
         do
         (with-current-buffer (lingr-get-room-buffer (lingr-roominfo-id roominfo))
@@ -394,10 +405,12 @@
           (let ((buffer-read-only nil))
             (erase-buffer)
             (goto-char (point-min))
-            (loop for message across (lingr-roominfo-messages roominfo)
+            (loop with prev-nick
+		  for message across (lingr-roominfo-messages roominfo)
                   do
                   (lingr-decode-message-text message)
-                  (lingr-insert-message message))))))
+                  (lingr-insert-message message)
+		  (setq lingr-prev-key (lingr-message-nick message)))))))
 
 (defun lingr-update-by-event (event)
   (case (lingr-event-type event)
