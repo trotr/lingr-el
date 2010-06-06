@@ -338,23 +338,23 @@
   (loop for key being the hash-keys in lingr-room-table using (hash-value room)
         if (buffer-live-p (lingr-room-buffer room)) collect key))
 
-(defvar lingr-image-hash (make-hash-table :test 'equal))
+(defvar lingr-image-hash (make-hash-table :test 'equal)) ;; hash-table for caching image data
 
-(defsubst lingr-icon-image (key message)
+(defsubst lingr-get-image (key url)
   (or (gethash key lingr-image-hash)
-      (let* ((url (assoc-default 'icon_url message))
-	     (buf (url-retrieve-synchronously url)))
+      (let ((buf (url-retrieve-synchronously url)))
 	(unwind-protect
-	    ;(with-current-buffer buf
-	      (condition-case e
-		  (let* ((type (when (re-search-forward  "Content-Type: image/\\(.+\\)" nil t 1)
-				 (intern (match-string 1))))
-			 (data (when (re-search-forward "^$" nil t 1)
-				 (buffer-substring (+ 1 (match-end 0)) (point-max)))))
-		    (and type data
-			 (puthash key (create-image data type t) lingr-image-hash))))
-	     ; (error nil)))
-	(kill-buffer buf)))))
+	    (condition-case e
+		(let* ((type (when (re-search-forward  "Content-Type: image/\\(.+\\)" nil t 1)
+			       (intern (match-string 1))))
+		       (data (when (re-search-forward "^$" nil t 1)
+			       (buffer-substring (+ 1 (match-end 0)) (point-max)))))
+		  (and type data
+		       (puthash key (create-image data type t) lingr-image-hash))))
+	  (kill-buffer buf)))))
+  
+(defsubst lingr-icon-image (nickname message)
+  (lingr-get-image nickname (assoc-default 'icon_url message)))
 
 (defvar lingr-prev-key nil)
 
@@ -394,7 +394,6 @@
 			       (concat "\n" fill-str))
 		    "\n"))))
 
-(setq lingr-icon-mode t)
 (defun lingr-refresh-rooms (json)
   (setq lingr-prev-key nil)
   (loop for roominfo across (lingr-response-rooms json)
