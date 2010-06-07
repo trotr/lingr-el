@@ -344,13 +344,13 @@
   (or (gethash key lingr-image-hash)
       (let ((buf (url-retrieve-synchronously url)))
 	(unwind-protect
-	    (condition-case e
-		(let* ((type (when (re-search-forward  "Content-Type: image/\\(.+\\)" nil t 1)
-			       (intern (match-string 1))))
-		       (data (when (re-search-forward "^$" nil t 1)
-			       (buffer-substring (+ 1 (match-end 0)) (point-max)))))
-		  (and type data
-		       (puthash key (create-image data type t) lingr-image-hash))))
+	    (with-current-buffer buf
+	      (let* ((type (when (re-search-forward  "Content-Type: image/\\(.+\\)" nil t 1)
+			     (intern (match-string 1))))
+		     (data (when (re-search-forward "^$" nil t 1)
+			     (buffer-substring (+ 1 (match-end 0)) (point-max)))))
+		(and type data
+		     (puthash key (create-image data type t) lingr-image-hash))))
 	  (kill-buffer buf)))))
   
 (defsubst lingr-icon-image (nickname message)
